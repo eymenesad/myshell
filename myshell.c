@@ -5,6 +5,8 @@
 #include <sys/wait.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
+#include <fcntl.h>
 
 #define MAX_INPUT_SIZE 1024
 #define MAX_ARG_SIZE 64
@@ -19,20 +21,36 @@ void parseInput(char* input, char** command, char** args) {
 }
 
 // Function to execute a command
-void executeCommand(char* command, char* args) {
+void executeCommand(char* command, char* args, int background, char* outputFile, int append) {
     pid_t pid = fork();
 
     if (pid == -1) {
         perror("Fork failed");
     } else if (pid == 0) {  // Child process
-        dup2(STDOUT_FILENO, STDERR_FILENO);
+        if (outputFile != NULL) {
+            int fd;
+            if (append) {
+                fd = open(outputFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
+            } else {
+                fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+            }
+
+            if (fd == -1) {
+                perror("Error opening output file");
+            }
+
+            dup2(fd, STDOUT_FILENO);
+            close(fd);
+        }
         // Execute the command
         execlp(command, command, args, (char *)NULL);
 
         // If execlp fails
         perror("Execution failed");
     } else {  // Parent process
-        wait(NULL);
+        if (!background) {
+            waitpid(pid, NULL, 0);
+        }
         // Append the executed command to the history file
         FILE* historyFile = fopen(".myshell_history", "a");
         if (historyFile == NULL) {
@@ -119,6 +137,10 @@ int main() {
 
         // Remove newline character
         input[strcspn(input, "\n")] = 0;
+         // Check for exit command
+        if (strcmp(input, "exit") == 0) {
+            break;  // Exit the loop and terminate the shell
+        }
 
         // Check for alias command
         if (strncmp(input, "alias", 5) == 0) {
@@ -144,9 +166,24 @@ int main() {
                 break;
             }
         }
+        // Check for background processing
+        int background = 0;
+        if (args != NULL && strcmp(args, "&") == 0) {
+            background = 1;
+            args = NULL;
+        }
+
+        // Check for redirection
+        char* outputFile = NULL;
+        int append = 0;
+        if (args != NULL && (strcmp(args, ">") == 0 || strcmp(args, ">>") == 0)) {
+            outputFile = strtok(NULL, " ");
+            append = (strcmp(args, ">>") == 0);
+            args = NULL;
+        }
 
         // Execute the command
-        executeCommand(command, args);
+        executeCommand(command, args, background, outputFile, append);
     }
 
     return 0;
