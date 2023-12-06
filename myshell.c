@@ -24,16 +24,23 @@ void executeCommand(char* command, char* args) {
 
     if (pid == -1) {
         perror("Fork failed");
-        exit(EXIT_FAILURE);
     } else if (pid == 0) {  // Child process
+        dup2(STDOUT_FILENO, STDERR_FILENO);
         // Execute the command
         execlp(command, command, args, (char *)NULL);
 
         // If execlp fails
         perror("Execution failed");
-        exit(EXIT_FAILURE);
     } else {  // Parent process
         wait(NULL);
+        // Append the executed command to the history file
+        FILE* historyFile = fopen(".myshell_history", "a");
+        if (historyFile == NULL) {
+            perror("Error opening history file for appending");
+        } else {
+            fprintf(historyFile, "%s\n", args ? args : command);
+            fclose(historyFile);
+        }
     }
 }
 
@@ -42,7 +49,6 @@ int getProcessCount() {
     FILE* processFile = popen("ps aux | wc -l", "r");
     if (processFile == NULL) {
         perror("Error counting processes");
-        exit(EXIT_FAILURE);
     }
 
     int count;
@@ -58,7 +64,7 @@ void getLastCommand(char* lastCommand) {
     FILE* historyFile = fopen(".myshell_history", "r");
     if (historyFile == NULL) {
         perror("Error opening history file");
-        exit(EXIT_FAILURE);
+        return;
     }
 
     // Read the last line from the history file
@@ -101,7 +107,7 @@ int main() {
 
     // Get the PATH variable
     PATH = getenv("PATH");
-
+    setenv("HOSTNAME", "your_hostname", 1);
     while (1) {
         // Print prompt
         printf("%s@%s %s --- ", getenv("USER"), getenv("HOSTNAME"), getcwd(NULL, 0));
