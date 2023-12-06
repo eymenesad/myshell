@@ -15,13 +15,26 @@
 char* PATH;
 
 // Function to parse input command
-void parseInput(char* input, char** command, char** args) {
-    *command = strtok(input, " ");
-    *args = strtok(NULL, " ");
+void parseInput(char* input, char*** commandArgs) {
+    int i = 0;
+    char* token = strtok(input, " ");
+    
+    // Allocate memory for an array of strings to store command and arguments
+    *commandArgs = malloc((MAX_ARG_SIZE + 1) * sizeof(char*));
+
+    while (token != NULL && i < MAX_ARG_SIZE) {
+        (*commandArgs)[i] = strdup(token);
+        token = strtok(NULL, " ");
+        i++;
+    }
+
+    // Set the last element to NULL to indicate the end of the array
+    (*commandArgs)[i] = NULL;
 }
 
+
 // Function to execute a command
-void executeCommand(char* command, char* args, int background, char* outputFile, int append) {
+void executeCommand(char* command, char** args, int background, char* outputFile, int append) {
     pid_t pid = fork();
 
     if (pid == -1) {
@@ -42,8 +55,8 @@ void executeCommand(char* command, char* args, int background, char* outputFile,
             dup2(fd, STDOUT_FILENO);
             close(fd);
         }
-        // Execute the command
-        execlp(command, command, args, (char *)NULL);
+         // Execute the command
+        execvp(command, args);
 
         // If execlp fails
         perror("Execution failed");
@@ -56,7 +69,12 @@ void executeCommand(char* command, char* args, int background, char* outputFile,
         if (historyFile == NULL) {
             perror("Error opening history file for appending");
         } else {
-            fprintf(historyFile, "%s\n", args ? args : command);
+            fprintf(historyFile, "%s", command);
+            // Append arguments to the history file
+            for (int i = 1; args[i] != NULL; i++) {
+                fprintf(historyFile, " %s", args[i]);
+            }
+            fprintf(historyFile, "\n");
             fclose(historyFile);
         }
     }
@@ -119,9 +137,11 @@ void belloCommand() {
 
 int main() {
     char input[MAX_INPUT_SIZE];
-    char *command, *args;
-    char alias[MAX_ALIAS_SIZE][MAX_INPUT_SIZE];
-    int aliasCount = 0;
+    //char *command, *args;
+    
+    char** commandArgs;
+    //char alias[MAX_ALIAS_SIZE][MAX_INPUT_SIZE];
+    //int aliasCount = 0;
 
     // Get the PATH variable
     PATH = getenv("PATH");
@@ -143,11 +163,11 @@ int main() {
         }
 
         // Check for alias command
-        if (strncmp(input, "alias", 5) == 0) {
+       /* if (strncmp(input, "alias", 5) == 0) {
             sscanf(input, "alias %s = \"%[^\"]\"", alias[aliasCount], alias[aliasCount]);
             aliasCount++;
             continue;
-        }
+        }*/
 
         // Check for bello command
         if (strcmp(input, "bello") == 0) {
@@ -157,33 +177,47 @@ int main() {
         }
 
         // Parse input command
-        parseInput(input, &command, &args);
+        parseInput(input,  &commandArgs);
 
         // Check for alias substitution
-        for (int i = 0; i < aliasCount; i++) {
+        /*for (int i = 0; i < aliasCount; i++) {
             if (strcmp(command, alias[i]) == 0) {
                 parseInput(alias[i], &command, &args);
                 break;
             }
-        }
+        }*/
         // Check for background processing
         int background = 0;
-        if (args != NULL && strcmp(args, "&") == 0) {
-            background = 1;
-            args = NULL;
+        int argCount = 0;
+        
+         // Count the number of arguments
+        while (commandArgs[argCount] != NULL) {
+            argCount++;
         }
 
-        // Check for redirection
+        // Check for background processing
+        if (argCount > 1 && strcmp(commandArgs[argCount - 1], "&") == 0) {
+            background = 1;
+            commandArgs[argCount - 1] = NULL;  // Remove the "&" from the arguments
+        }
+
+         // Check for redirection
         char* outputFile = NULL;
         int append = 0;
-        if (args != NULL && (strcmp(args, ">") == 0 || strcmp(args, ">>") == 0)) {
-            outputFile = strtok(NULL, " ");
-            append = (strcmp(args, ">>") == 0);
-            args = NULL;
+        if (argCount > 1 && (strcmp(commandArgs[argCount - 2], ">") == 0 || strcmp(commandArgs[argCount - 2], ">>") == 0)) {
+            outputFile = commandArgs[argCount - 1];
+            append = (strcmp(commandArgs[argCount - 2], ">>") == 0);
+            commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
         }
-
+        
         // Execute the command
-        executeCommand(command, args, background, outputFile, append);
+        executeCommand(commandArgs[0], commandArgs, background, outputFile, append);
+
+        // Free allocated memory for commandArgs
+        for (int i = 0; i < argCount; i++) {
+            free(commandArgs[i]);
+        }
+        free(commandArgs);
     }
 
     return 0;
