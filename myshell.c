@@ -14,6 +14,15 @@
 
 char* PATH;
 
+// Data structure to store aliases
+typedef struct {
+    char alias[MAX_ALIAS_SIZE][MAX_INPUT_SIZE];
+    char command[MAX_ALIAS_SIZE][MAX_INPUT_SIZE];
+    int count;
+} AliasList;
+
+AliasList aliases;
+
 // Function to parse input command
 void parseInput(char* input, char*** commandArgs) {
     int i = 0;
@@ -32,9 +41,40 @@ void parseInput(char* input, char*** commandArgs) {
     (*commandArgs)[i] = NULL;
 }
 
+// Function to initialize alias list
+void initAliases() {
+    aliases.count = 0;
+}
+
+// Function to add alias to the list
+void addAlias(char* alias, char* command) {
+    if (aliases.count < MAX_ALIAS_SIZE) {
+        strcpy(aliases.alias[aliases.count], alias);
+        strcpy(aliases.command[aliases.count], command);
+        aliases.count++;
+    } else {
+        fprintf(stderr, "Maximum number of aliases reached\n");
+    }
+}
+
+// Function to substitute alias in the command
+int substituteAlias(char* input, char*** commandArgs) {
+    for (int i = 0; i < aliases.count; i++) {
+        if (strcmp(input, aliases.alias[i]) == 0) {
+            parseInput(aliases.command[i], commandArgs);
+            return 1; // Alias substitution successful
+        }
+    }
+    return 0; // No alias substitution
+}
+
+
+
+
+
 
 // Function to execute a command
-void executeCommand(char* command, char** args, int background, char* outputFile, int append) {
+void executeCommand(char* command, char** args, int background, char* outputFile, int append, int isAlias) {
     pid_t pid = fork();
 
     if (pid == -1) {
@@ -55,8 +95,12 @@ void executeCommand(char* command, char** args, int background, char* outputFile
             dup2(fd, STDOUT_FILENO);
             close(fd);
         }
-         // Execute the command
-        execvp(command, args);
+        // Execute the command
+        if (isAlias) {
+            execvp(args[0], args);
+        } else {
+            execvp(command, args);
+        }
 
         // If execlp fails
         perror("Execution failed");
@@ -146,6 +190,8 @@ int main() {
     // Get the PATH variable
     PATH = getenv("PATH");
     setenv("HOSTNAME", "your_hostname", 1);
+    initAliases();
+
     while (1) {
         // Print prompt
         printf("%s@%s %s --- ", getenv("USER"), getenv("HOSTNAME"), getcwd(NULL, 0));
@@ -162,13 +208,32 @@ int main() {
             break;  // Exit the loop and terminate the shell
         }
 
-        // Check for alias command
-       /* if (strncmp(input, "alias", 5) == 0) {
-            sscanf(input, "alias %s = \"%[^\"]\"", alias[aliasCount], alias[aliasCount]);
-            aliasCount++;
-            continue;
-        }*/
+       
 
+        // Check for alias creation
+        if (strncmp(input, "alias", 5) == 0) {
+            char alias[MAX_INPUT_SIZE], command[MAX_INPUT_SIZE];
+            if (sscanf(input, "alias %s = \"%[^\"]\"", alias, command) == 2) {
+                addAlias(alias, command);
+                continue;
+            } else {
+                fprintf(stderr, "Invalid alias syntax\n");
+                continue;
+            }
+        }
+        int background = 0;
+        int argCount = 0;
+        char* outputFile = NULL;
+        int append = 0;
+        // Parse input command
+        parseInput(input,  &commandArgs);
+        // Check for alias substitution
+        if (substituteAlias(input, &commandArgs)) {
+            // Alias substitution successful, continue to the next iteration
+            executeCommand(commandArgs[0], commandArgs, background, outputFile, append, 1);
+
+            continue;
+        }
         // Check for bello command
         if (strcmp(input, "bello") == 0) {
             // Implement bello command
@@ -176,8 +241,7 @@ int main() {
             continue;
         }
 
-        // Parse input command
-        parseInput(input,  &commandArgs);
+        
 
         // Check for alias substitution
         /*for (int i = 0; i < aliasCount; i++) {
@@ -187,8 +251,6 @@ int main() {
             }
         }*/
         // Check for background processing
-        int background = 0;
-        int argCount = 0;
         
          // Count the number of arguments
         while (commandArgs[argCount] != NULL) {
@@ -202,8 +264,7 @@ int main() {
         }
 
          // Check for redirection
-        char* outputFile = NULL;
-        int append = 0;
+        
         if (argCount > 1 && (strcmp(commandArgs[argCount - 2], ">") == 0 || strcmp(commandArgs[argCount - 2], ">>") == 0)) {
             outputFile = commandArgs[argCount - 1];
             append = (strcmp(commandArgs[argCount - 2], ">>") == 0);
@@ -211,7 +272,7 @@ int main() {
         }
         
         // Execute the command
-        executeCommand(commandArgs[0], commandArgs, background, outputFile, append);
+        executeCommand(commandArgs[0], commandArgs, background, outputFile, append,0);
 
         // Free allocated memory for commandArgs
         for (int i = 0; i < argCount; i++) {
