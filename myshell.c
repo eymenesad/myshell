@@ -28,20 +28,24 @@
 
     void parseInput(char* input, char*** commandArgs) {
     int i = 0;
-    
     // Allocate memory for an array of strings to store command and arguments
     *commandArgs = malloc((MAX_ARG_SIZE + 1) * sizeof(char*));
-    char* token = strtok(input, " ");
 
+    char* token = strtok(input, " ");
+  
     while (token != NULL && i < MAX_ARG_SIZE) {
+        
         (*commandArgs)[i] = strdup(token);
+       
         token = strtok(NULL, " ");
+        
         i++;
     }
-
+    
     // Set the last element to NULL to indicate the end of the array
     (*commandArgs)[i] = NULL;
-}
+      
+    }
 
     void saveAliasesToFile() {
         FILE* aliasFile = fopen("aliases.txt", "w");
@@ -97,20 +101,6 @@
         fclose(aliasFile);
     }
 
-   
-
-    // Function to substitute alias in the command
-   /*int substituteAlias(char* input, char*** commandArgs) {
-        // Load aliases from file during initialization
-        loadAliasesFromFile();
-        for (int i = 0; i < aliases.count; i++) {
-            if (strcmp(input, aliases.alias[i]) == 0) {
-                parseInput(aliases.command[i], commandArgs);
-                return 1; // Alias substitution successful
-            }
-        }
-        return 0; // No alias substitution
-    }*/
     // Function to substitute alias in the command
     int substituteAlias(char* input, char*** commandArgs) {
         // Load aliases from file during initialization
@@ -123,12 +113,14 @@
                 strcpy(substitutedCommand, aliases.command[i]);
 
                 // Clear existing commandArgs
-                if (*commandArgs != NULL) {
-                    for (int j = 0; (*commandArgs)[j] != NULL; j++) {
-                        free((*commandArgs)[j]);
+                    if (*commandArgs != NULL) {
+                        int j = 0;
+                        while ((*commandArgs)[j] != NULL) {
+                            free((*commandArgs)[j]);
+                            j++;
+                        }
+                        free(*commandArgs);
                     }
-                    free(*commandArgs);
-                }
 
                 // Parse the substituted command into commandArgs
                 parseInput(substitutedCommand, commandArgs);
@@ -147,7 +139,7 @@
         if (pid == -1) {
             perror("Fork failed");
         } else if (pid == 0) {  // Child process
-            // Check for background processing        
+               // Check for redirection
             if (outputFile != NULL) {
                 int fd;
                 if (append) {
@@ -159,9 +151,9 @@
                 if (fd == -1) {
                     perror("Error opening output file");
                 }
-
+            
                 dup2(fd, STDOUT_FILENO);
-                close(fd);
+                close(fd);        
             }
             // Execute the command
             if (isAlias) {
@@ -172,6 +164,7 @@
 
             // If execlp fails
             perror("Execution failed");
+            exit(0);
         } else {  // Parent process
             if (!background) {
                 waitpid(pid, NULL, 0);
@@ -188,50 +181,50 @@
                 }
                 fprintf(historyFile, "\n");
                 fclose(historyFile);
+            
+
             }
 
-        }
+            // Handle re-redirection (">>>")
+            if (invertOrder) {
+                // Open the output file for reading
+                FILE* outputFilePtr = fopen(outputFile, "r");
+                if (outputFilePtr == NULL) {
+                    printf("outputFilePtr is null\n");
+                    perror("Error opening output file for reading");
+                    return;
+                }
 
-        // Handle re-redirection (">>>")
-        if (invertOrder) {
-            // Open the output file for reading
-            FILE* outputFilePtr = fopen(outputFile, "r");
-            if (outputFilePtr == NULL) {
-                printf("outputFilePtr is null\n");
-                perror("Error opening output file for reading");
-                return;
+                // Read the content of the output file
+                char content[MAX_INPUT_SIZE];
+                size_t bytesRead = fread(content, 1, sizeof(content), outputFilePtr);
+                fclose(outputFilePtr);
+
+                // Invert the order of characters
+                for (size_t i = 0; i < bytesRead / 2; i++) {
+                    char temp = content[i];
+                    content[i] = content[bytesRead - i - 1];
+                    content[bytesRead - i - 1] = temp;
+                }
+
+                // Open the output file for writing (overwrite)
+                FILE* invertedFilePtr = fopen(outputFile, "w");
+                if (invertedFilePtr == NULL) {
+                    printf("invertedFilePtr is null\n");
+                    perror("Error opening output file for writing");
+                    return;
+                }
+
+                // Write the inverted content back to the output file
+                fwrite(content, 1, bytesRead, invertedFilePtr);
+                fclose(invertedFilePtr);
+                }
+            
+
             }
-
-            // Read the content of the output file
-            char content[MAX_INPUT_SIZE];
-            size_t bytesRead = fread(content, 1, sizeof(content), outputFilePtr);
-            fclose(outputFilePtr);
-
-            // Invert the order of characters
-            for (size_t i = 0; i < bytesRead / 2; i++) {
-                char temp = content[i];
-                content[i] = content[bytesRead - i - 1];
-                content[bytesRead - i - 1] = temp;
-            }
-
-            // Open the output file for writing (overwrite)
-            FILE* invertedFilePtr = fopen(outputFile, "w");
-            if (invertedFilePtr == NULL) {
-                printf("invertedFilePtr is null\n");
-                perror("Error opening output file for writing");
-                return;
-            }
-
-            // Write the inverted content back to the output file
-            fwrite(content, 1, bytesRead, invertedFilePtr);
-            fclose(invertedFilePtr);
-        }
-
-
-
-
 
     }
+    
 
     // Function to get the number of processes being executed
     int getProcessCount() {
@@ -290,12 +283,8 @@
 
     int main() {
         char input[MAX_INPUT_SIZE];
-        //char *command, *args;
         int invertOrder = 0;
         char** commandArgs=NULL;
-        //char alias[MAX_ALIAS_SIZE][MAX_INPUT_SIZE];
-        //int aliasCount = 0;
-
         // Get the PATH variable
         PATH = getenv("PATH");
         setenv("HOSTNAME", "your_hostname", 1);
@@ -317,7 +306,6 @@
 
             // Remove newline character
             input[strcspn(input, "\n")] = 0;
-            
             // Check for alias creation
             if (strncmp(input, "alias", 5) == 0) {
                 char alias[MAX_INPUT_SIZE], command[MAX_INPUT_SIZE];
@@ -326,31 +314,31 @@
                     // Save aliases to file after adding a new alias
                     saveAliasesToFile();
                     continue;
-                } else {
+                }
+                
+                
+                
+                
+                else {
                     fprintf(stderr, "Invalid alias syntax\n");
                     continue;
                 }
             
             }
-            
             // Parse input command
             parseInput(input,  &commandArgs);
-            
 
-            printf("Before substitution: %s\n", input);
+            // Check if commandArgs is NULL, which may happen due to an error in parseInput
+            if (commandArgs == NULL || commandArgs[0] == NULL) {
+                continue;
+            }
             // Check for alias substitution
             if (substituteAlias(input, &commandArgs)) {
-                printf("After substitution:");
-                for (int i = 0; commandArgs[i] != NULL; i++) {
-                    printf(" %s", commandArgs[i]);
-                }
-                printf("\n");
-
                 // Alias substitution successful, continue to the next iteration
                 executeCommand(commandArgs[0], commandArgs, background, outputFile, append, 1, invertOrder);
 
-                // Free allocated memory for commandArgs after execution
-                for (int i = 0; commandArgs[i] != NULL; i++) {
+                // Free allocated memory for commandArgs after parsing and checking for alias substitution
+                for (int i = 0; i < argCount; i++) {
                     free(commandArgs[i]);
                 }
                 free(commandArgs);
@@ -360,6 +348,7 @@
 
                 continue;
             }
+        
             // Check for bello command
             if (strcmp(input, "bello") == 0) {
                 // Implement bello command
@@ -370,36 +359,51 @@
             
             // Count the number of arguments
             while (commandArgs[argCount] != NULL) {
+                
                 argCount++;
+                
             }
 
+            
             // Check for background processing
-            if (argCount > 1 && strcmp(commandArgs[argCount - 1], "&") == 0) {
+            if (argCount > 1 && strcmp(commandArgs[argCount-1], "&") == 0) {
                 background = 1;
                 commandArgs[argCount - 1] = NULL;  // Remove the "&" from the arguments
+                argCount--;
             }
 
             // Check for redirection
-            
-            if (argCount > 1 && (strcmp(commandArgs[argCount - 2], ">") == 0 || strcmp(commandArgs[argCount - 2], ">>") == 0)) {
+           
+            if (argCount > 1 && (strcmp(commandArgs[argCount - 2], ">") == 0)) {
                 outputFile = commandArgs[argCount - 1];
-                append = (strcmp(commandArgs[argCount - 2], ">>") == 0);
                 commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
+                argCount -= 2;
+                append = 0;
             }
+            if (argCount > 1 &&  strcmp(commandArgs[argCount - 2], ">>") == 0) {
+                
+                outputFile = commandArgs[argCount - 1];
+                
+                commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
+                argCount -= 2;
+                append = 1;
+            }
+            
             // Check for re-redirection (">>>")
             if (argCount > 1 && strcmp(commandArgs[argCount - 2], ">>>") == 0) {
                 outputFile = commandArgs[argCount - 1];
                 invertOrder = 1;
                 commandArgs[argCount - 2] = NULL;  // Remove the ">>>" and the filename
+                argCount -= 2;
             }
+            
             // Check for exit command
             if (strcmp(input, "exit") == 0) {
                 break;  // Exit the loop and terminate the shell
             }
-
+            
             // Execute the command
             executeCommand(commandArgs[0], commandArgs, background, outputFile, append,0, invertOrder);
-
             // Free allocated memory for commandArgs
             for (int i = 0; i < argCount; i++) {
                 free(commandArgs[i]);
