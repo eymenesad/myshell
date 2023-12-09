@@ -167,7 +167,8 @@
             exit(0);
         } else {  // Parent process
             if (!background) {
-                waitpid(pid, NULL, 0);
+                int status;
+                waitpid(pid, &status, 0);
             }
             // Append the executed command to the history file
             FILE* historyFile = fopen(".myshell_history", "a");
@@ -187,18 +188,43 @@
 
             // Handle re-redirection (">>>")
             if (invertOrder) {
-                // Open the output file for reading
-                FILE* outputFilePtr = fopen(outputFile, "r");
+
+                // Wait for the child process to finish
+                int status;
+                waitpid(pid, &status, 0);
+
+                // Open the output file for reading and writing
+                FILE* outputFilePtr = fopen(outputFile, "r+");
                 if (outputFilePtr == NULL) {
-                    printf("outputFilePtr is null\n");
-                    perror("Error opening output file for reading");
+                    perror("Error opening output file for reading and writing");
                     return;
                 }
 
-                // Read the content of the output file
-                char content[MAX_INPUT_SIZE];
-                size_t bytesRead = fread(content, 1, sizeof(content), outputFilePtr);
-                fclose(outputFilePtr);
+                // Seek to the end of the file
+                fseek(outputFilePtr, 0, SEEK_END);
+
+                // Get the current position (end of the file)
+                long endPos = ftell(outputFilePtr);
+                //remove end of line character
+                if (endPos > 0) {
+                    endPos--;
+                }
+
+
+                // Allocate memory for the content of the output file plus one extra byte for null terminator
+                char* content = malloc(endPos + 1);
+                if (content == NULL) {
+                    perror("Memory allocation error");
+                    fclose(outputFilePtr);
+                    return;
+                }
+
+                            // Read the content of the output file
+                fseek(outputFilePtr, 0, SEEK_SET);
+                size_t bytesRead = fread(content, 1, endPos, outputFilePtr);
+
+                // Null terminate the content
+                content[bytesRead] = '\0';
 
                 // Invert the order of characters
                 for (size_t i = 0; i < bytesRead / 2; i++) {
@@ -207,18 +233,16 @@
                     content[bytesRead - i - 1] = temp;
                 }
 
-                // Open the output file for writing (overwrite)
-                FILE* invertedFilePtr = fopen(outputFile, "w");
-                if (invertedFilePtr == NULL) {
-                    printf("invertedFilePtr is null\n");
-                    perror("Error opening output file for writing");
-                    return;
-                }
-
                 // Write the inverted content back to the output file
-                fwrite(content, 1, bytesRead, invertedFilePtr);
-                fclose(invertedFilePtr);
-                }
+                fseek(outputFilePtr, 0, SEEK_SET);
+                fwrite(content, 1, bytesRead, outputFilePtr);
+
+                // Clean up and free memory
+                free(content);
+                fclose(outputFilePtr);
+            }
+
+
             
 
             }
@@ -334,6 +358,47 @@
             }
             // Check for alias substitution
             if (substituteAlias(input, &commandArgs)) {
+                //check for > or >> or >>> in the substituted command
+                // Count the number of arguments
+                while (commandArgs[argCount] != NULL) {
+                    argCount++;
+                }
+
+                
+                // Check for background processing
+                if (argCount > 1 && strcmp(commandArgs[argCount-1], "&") == 0) {
+                    background = 1;
+                    commandArgs[argCount - 1] = NULL;  // Remove the "&" from the arguments
+                    argCount--;
+                }
+
+                // Check for redirection
+            
+                if (argCount > 1 && (strcmp(commandArgs[argCount - 2], ">") == 0)) {
+                    outputFile = commandArgs[argCount - 1];
+                    commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
+                    argCount -= 2;
+                    append = 0;
+                }
+                if (argCount > 1 &&  strcmp(commandArgs[argCount - 2], ">>") == 0) {
+                    
+                    outputFile = commandArgs[argCount - 1];
+                    
+                    commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
+                    argCount -= 2;
+                    append = 1;
+                }
+                
+                // Check for re-redirection (">>>")
+                if (argCount > 1 && strcmp(commandArgs[argCount - 2], ">>>") == 0) {
+                    outputFile = commandArgs[argCount - 1];
+                    invertOrder = 1;
+                    commandArgs[argCount - 2] = NULL;  // Remove the ">>>" and the filename
+                    argCount -= 2;
+                }
+                    
+                    
+                    
                 // Alias substitution successful, continue to the next iteration
                 executeCommand(commandArgs[0], commandArgs, background, outputFile, append, 1, invertOrder);
 
