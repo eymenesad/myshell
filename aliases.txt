@@ -1,0 +1,2 @@
+eymen1 = "ls"
+naz = "ls -l"
