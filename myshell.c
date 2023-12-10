@@ -7,6 +7,8 @@
     #include <time.h>
     #include <sys/stat.h>
     #include <fcntl.h>
+    
+
 
     #define MAX_INPUT_SIZE 1024
     #define MAX_ARG_SIZE 64
@@ -155,6 +157,7 @@
                 dup2(fd, STDOUT_FILENO);
                 close(fd);        
             }
+        
             // Execute the command
             if (isAlias) {
                 execvp(args[0], args);
@@ -285,10 +288,9 @@
     }
 
     // Function to implement the "bello" command
-    void belloCommand() {
+    void belloCommand(int processCount) {
         char lastCommand[MAX_INPUT_SIZE];
         getLastCommand(lastCommand);
-
         printf("1. Username: %s\n", getenv("USER"));
         printf("2. Hostname: %s\n", getenv("HOSTNAME"));
         printf("3. Last Executed Command: %s\n", lastCommand);
@@ -301,8 +303,19 @@
         time(&rawtime);
         timeinfo = localtime(&rawtime);
         printf("7. Current Time and Date: %s", asctime(timeinfo));
-
-        printf("8. Current number of processes being executed: %d\n", getProcessCount());
+        // Handle terminated child processes (zombies)
+        // Check for terminated child processes and update processCount
+        pid_t terminated_child;
+        do {
+            terminated_child = waitpid(-1, NULL, WNOHANG);
+            if (terminated_child < 0) {
+                processCount--;
+            }
+        } while (terminated_child > 0);
+        if(processCount < 0) {
+            processCount = 0;
+        }                            
+        printf("8. Current number of processes being executed: %d\n", processCount);
     }
 
     int main() {
@@ -312,7 +325,7 @@
         // Get the PATH variable
         PATH = getenv("PATH");
         setenv("HOSTNAME", "your_hostname", 1);
-        
+        int processCount = 0;
         
         while (1) {
             loadAliasesFromFile();
@@ -320,6 +333,7 @@
             int argCount = 0;
             char* outputFile = NULL;
             int append = 0;
+            
             // Print prompt
             printf("%s@%s %s --- ", getenv("USER"), getenv("HOSTNAME"), getcwd(NULL, 0));
 
@@ -370,6 +384,7 @@
                     background = 1;
                     commandArgs[argCount - 1] = NULL;  // Remove the "&" from the arguments
                     argCount--;
+                    processCount++;
                 }
 
                 // Check for redirection
@@ -413,14 +428,7 @@
 
                 continue;
             }
-        
-            // Check for bello command
-            if (strcmp(input, "bello") == 0) {
-                // Implement bello command
-                belloCommand();
-                continue;
-            }
-
+            
             
             // Count the number of arguments
             while (commandArgs[argCount] != NULL) {
@@ -435,6 +443,100 @@
                 background = 1;
                 commandArgs[argCount - 1] = NULL;  // Remove the "&" from the arguments
                 argCount--;
+                processCount++;
+            }
+             // Check for bello command
+            if (strcmp(input, "bello") == 0) {
+                int flagForredirection = 0;
+                // Check for redirection
+                if (argCount > 1 && (strcmp(commandArgs[argCount - 2], ">") == 0)) {
+                    outputFile = commandArgs[argCount - 1];
+                    commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
+                    argCount -= 2;
+                    append = 0;
+                    flagForredirection = 1;
+                }
+                if (argCount > 1 &&  strcmp(commandArgs[argCount - 2], ">>") == 0) {
+                    outputFile = commandArgs[argCount - 1];
+                    commandArgs[argCount - 2] = NULL;  // Remove the ">" or ">>" and the filename
+                    argCount -= 2;
+                    append = 1;
+                    flagForredirection = 1;    
+                }
+
+                // Check for re-redirection (">>>")
+                if (argCount > 1 && strcmp(commandArgs[argCount - 2], ">>>") == 0) {
+                    outputFile = commandArgs[argCount - 1];
+                    invertOrder = 1;
+                    commandArgs[argCount - 2] = NULL;  // Remove the ">>>" and the filename
+                    argCount -= 2;
+                    flagForredirection = 1;
+                }
+
+                if (flagForredirection == 1) {
+                    pid_t pid = fork();
+
+                    if (pid == -1) {
+                        perror("Fork failed");
+                    } else if (pid == 0) {  // Child process
+                        int fd;
+                        if (append) {
+                            fd = open(outputFile, O_WRONLY | O_CREAT | O_APPEND, 0644);
+                        } else {
+                            fd = open(outputFile, O_WRONLY | O_CREAT | O_TRUNC, 0644);
+                        }
+
+                        if (fd == -1) {
+                            perror("Error opening output file");
+                            exit(1);
+                        }
+
+                        // Redirect stdout to the file
+                        dup2(fd, STDOUT_FILENO);
+                        close(fd);
+
+                        // Execute belloCommand
+                        belloCommand(processCount);
+
+                        // Exit the child process
+                        exit(0);
+                    } else {  // Parent process
+                        if (!background) {
+                            int status;
+                            waitpid(pid, &status, 0);
+                        }
+                        // Rest of the code for the parent process (history file, etc.)
+                        // Append the executed command to the history file
+                        FILE* historyFile = fopen(".myshell_history", "a");
+                        if (historyFile == NULL) {
+                            perror("Error opening history file for appending");
+                        } else {
+                            fprintf(historyFile, "%s", commandArgs[0]);
+                            // Append arguments to the history file
+                            for (int i = 1; commandArgs[i] != NULL; i++) {
+                                fprintf(historyFile, " %s", commandArgs[i]);
+                            }
+                            fprintf(historyFile, "\n");
+                            fclose(historyFile);
+                        }
+                    }
+
+                    // Free allocated memory for commandArgs
+                    for (int i = 0; i < argCount; i++) {
+                        free(commandArgs[i]);
+                    }
+                    free(commandArgs);
+                    commandArgs = NULL;
+
+                    background = 0;
+                    outputFile = NULL;
+                    append = 0;
+                    continue;
+                } else {
+                    // Execute belloCommand without redirection
+                    belloCommand(processCount);
+                    continue;
+                }
             }
 
             // Check for redirection
@@ -478,7 +580,6 @@
             background = 0;
             outputFile = NULL;
             append = 0;
-        }
-        
-        return 0;
+            
+    }
     }

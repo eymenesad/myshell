@@ -1,10 +1,8 @@
-0
-1
-2
-3
-4
-5
-6
-7
-8
-9
+1. Username: root
+2. Hostname: your_hostname
+3. Last Executed Command: python3 toto.py
+4. TTY: (null)
+5. Current Shell Name: /bin/bash
+6. Home Location: /root
+7. Current Time and Date: Sun Dec 10 21:58:23 2023
+8. Current number of processes being executed: 0
