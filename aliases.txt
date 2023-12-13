@@ -1,3 +1,4 @@
 eymen1 = "ls"
 naz = "ls -l"
 ds = "python3 test.py >> a.txt"
+gh = " ls "

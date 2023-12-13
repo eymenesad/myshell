@@ -134,14 +134,16 @@
         return 0; // No alias substitution
     }
 
-    // Function to execute a command
+ 
+
+        // Function to execute a command
     void executeCommand(char* command, char** args, int background, char* outputFile, int append, int isAlias, int invertOrder) {
         pid_t pid = fork();
 
         if (pid == -1) {
             perror("Fork failed");
         } else if (pid == 0) {  // Child process
-               // Check for redirection
+            // Check for redirection
             if (outputFile != NULL) {
                 int fd;
                 if (append) {
@@ -153,21 +155,104 @@
                 if (fd == -1) {
                     perror("Error opening output file");
                 }
-            
+
                 dup2(fd, STDOUT_FILENO);
-                close(fd);        
+                close(fd);
             }
-        
-            // Execute the command
-            if (isAlias) {
-                execvp(args[0], args);
-            } else {
-                execvp(command, args);
+            if(!invertOrder) {
+            // Execute the command in the child process
+                if (isAlias) {
+                    execvp(args[0], args);
+                } else {
+                    execvp(command, args);
+                }
+
+                // If execlp fails
+                perror("Execution failed");
+                exit(1);
             }
 
-            // If execlp fails
-            perror("Execution failed");
-            exit(0);
+            // Check for invert order and background process
+            if (invertOrder) {
+                pid_t grandchild_pid = fork();
+
+                if (grandchild_pid == -1) {
+                    perror("Grandchild Fork failed");
+                } else if (grandchild_pid == 0) {  // Grandchild process
+                    // Set up pipe for communication between grandchild and child
+                    int pipefd[2];
+                    if (pipe(pipefd) == -1) {
+                        perror("Pipe failed");
+                        exit(1);
+                    }
+
+                    // Fork another process to handle invert order
+                    pid_t invert_pid = fork();
+
+                    if (invert_pid == -1) {
+                        perror("Invert Fork failed");
+                    } else if (invert_pid == 0) {  // Invert order process
+                        // Close the write end of the pipe
+                        close(pipefd[1]);
+
+                        // Read from the pipe and invert the content
+                        char buffer[MAX_INPUT_SIZE];
+                        ssize_t bytesRead = read(pipefd[0], buffer, sizeof(buffer));
+
+                        for (ssize_t i = bytesRead - 1; i >= 0; i--) {
+                            putchar(buffer[i]);
+                        }
+
+                        close(pipefd[0]);
+                        exit(0);
+                    } else {  // Child process
+                        // Close the read end of the pipe
+                        close(pipefd[0]);
+
+                        // Redirect stdout to the write end of the pipe
+                        dup2(pipefd[1], STDOUT_FILENO);
+                        close(pipefd[1]);
+
+                        // Execute the command in the background
+                        if (isAlias) {
+                            execvp(args[0], args);
+                        } else {
+                            execvp(command, args);
+                        }
+
+                        perror("Execution failed");
+                        exit(1);
+                    }
+                } else {  // Child process
+                    // Wait for the grandchild process to finish
+                    int status;
+                    waitpid(grandchild_pid, &status, 0);
+                    // Execute the command in the child process
+                    /*if (isAlias) {
+                        execvp(args[0], args);
+                    } else {
+                        execvp(command, args);
+                    }
+
+                    // If execlp fails
+                    perror("Execution failed");*/
+                    exit(1);
+                }
+                    // Exit the child process
+                  
+                
+            } else {
+                // Execute the command in the child process
+                if (isAlias) {
+                    execvp(args[0], args);
+                } else {
+                    execvp(command, args);
+                }
+
+                // If execlp fails
+                perror("Execution failed");
+                exit(1);
+            }
         } else {  // Parent process
             if (!background) {
                 int status;
@@ -185,72 +270,10 @@
                 }
                 fprintf(historyFile, "\n");
                 fclose(historyFile);
-            
-
             }
-
-            // Handle re-redirection (">>>")
-            if (invertOrder) {
-
-                // Wait for the child process to finish
-                int status;
-                waitpid(pid, &status, 0);
-
-                // Open the output file for reading and writing
-                FILE* outputFilePtr = fopen(outputFile, "r+");
-                if (outputFilePtr == NULL) {
-                    perror("Error opening output file for reading and writing");
-                    return;
-                }
-
-                // Seek to the end of the file
-                fseek(outputFilePtr, 0, SEEK_END);
-
-                // Get the current position (end of the file)
-                long endPos = ftell(outputFilePtr);
-                //remove end of line character
-                if (endPos > 0) {
-                    endPos--;
-                }
-
-
-                // Allocate memory for the content of the output file plus one extra byte for null terminator
-                char* content = malloc(endPos + 1);
-                if (content == NULL) {
-                    perror("Memory allocation error");
-                    fclose(outputFilePtr);
-                    return;
-                }
-
-                            // Read the content of the output file
-                fseek(outputFilePtr, 0, SEEK_SET);
-                size_t bytesRead = fread(content, 1, endPos, outputFilePtr);
-
-                // Null terminate the content
-                content[bytesRead] = '\0';
-
-                // Invert the order of characters
-                for (size_t i = 0; i < bytesRead / 2; i++) {
-                    char temp = content[i];
-                    content[i] = content[bytesRead - i - 1];
-                    content[bytesRead - i - 1] = temp;
-                }
-
-                // Write the inverted content back to the output file
-                fseek(outputFilePtr, 0, SEEK_SET);
-                fwrite(content, 1, bytesRead, outputFilePtr);
-
-                // Clean up and free memory
-                free(content);
-                fclose(outputFilePtr);
-            }
-
-
-            
-
-            }
-
+        }
     }
+
     
 
     // Function to get the number of processes being executed
@@ -320,7 +343,7 @@
 
     int main() {
         char input[MAX_INPUT_SIZE];
-        int invertOrder = 0;
+        
         char** commandArgs=NULL;
         // Get the PATH variable
         PATH = getenv("PATH");
@@ -333,7 +356,7 @@
             int argCount = 0;
             char* outputFile = NULL;
             int append = 0;
-            
+            int invertOrder = 0;
             // Print prompt
             printf("%s@%s %s --- ", getenv("USER"), getenv("HOSTNAME"), getcwd(NULL, 0));
 
